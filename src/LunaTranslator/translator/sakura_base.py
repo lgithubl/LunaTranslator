@@ -303,7 +303,11 @@ Translate the following text into {}. Note that you must ONLY output the transla
         )
         _json = common_create_gpt_data(self.config, messages, extrabody)
         response = self.proxysession.post(
-            apitype.finalurl(), headers=headers, json=_json, stream=usingstream
+            apitype.finalurl(),
+            headers=headers,
+            json=_json,
+            stream=usingstream,
+            timeout=(10, 60),
         )
         getmodelhook = []
         try:
