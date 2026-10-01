@@ -155,30 +155,63 @@ class texthook(basetext):
         self.multiselectedcollectorlock = threading.Lock()
         self.lastflushtime = 0
         self.runonce_line = ""
+        self._last_output_time = 0
+        self._last_output_text = ""
         self.emugameid = None
         self.engine = ""
         self._unityfont_autoemitted = False
         gobject.base.autoswitchgameuid = False
         self.initdll()
         self.delaycollectallselectedoutput()
+        self.diagnosticheartbeat()
         self.autohookmonitorthread()
 
     def edit_selectedhook_remove(self, key):
+        log_enabled = hanglog.enabled()
+        if log_enabled:
+            hanglog.log(
+                "texthook.selectedhook.remove.before",
+                selected=len(self.selectedhook),
+                key=self.serialkey(key),
+            )
         try:
             self.selectedhook.remove(key)
         except:
             pass
         _, _, tp = key
         self.Luna_SyncThread(tp, False)
+        if log_enabled:
+            hanglog.log(
+                "texthook.selectedhook.remove.after",
+                selected=len(self.selectedhook),
+                key=self.serialkey(key),
+            )
 
     def edit_selectedhook_insert(self, key, idx=-1):
+        log_enabled = hanglog.enabled()
+        if log_enabled:
+            hanglog.log(
+                "texthook.selectedhook.insert.before",
+                selected=len(self.selectedhook),
+                idx=idx,
+                key=self.serialkey(key),
+            )
         if idx == -1:
             idx = len(self.selectedhook)
         self.selectedhook.insert(idx, key)
         _, _, tp = key
         self.Luna_SyncThread(tp, True)
+        if log_enabled:
+            hanglog.log(
+                "texthook.selectedhook.insert.after",
+                selected=len(self.selectedhook),
+                idx=idx,
+                key=self.serialkey(key),
+            )
 
     def initdll(self):
+        if hanglog.enabled():
+            hanglog.log("texthook.initdll.start")
         LunaHost = CDLL(
             gobject.GetDllpath(
                 ("LunaHost32.dll", "LunaHost64.dll"),
@@ -264,7 +297,53 @@ class texthook(basetext):
         ]
         self.keepref += procs
         self.Luna_Start(*procs)
+        if hanglog.enabled():
+            hanglog.log("texthook.initdll.luna_start.done")
         self.setlang()
+        if hanglog.enabled():
+            hanglog.log("texthook.initdll.done")
+
+    @threader
+    def diagnosticheartbeat(self):
+        while not self.ending:
+            time.sleep(5)
+            if not hanglog.enabled():
+                continue
+            try:
+                foreground = windows.GetForegroundWindow()
+                foreground_pid = windows.GetWindowThreadProcessId(foreground)
+                foreground_process = (
+                    windows.GetProcessFileName(foreground_pid) if foreground_pid else ""
+                )
+                foreground_title = windows.GetWindowText(foreground) if foreground else ""
+            except:
+                foreground = 0
+                foreground_pid = 0
+                foreground_process = ""
+                foreground_title = ""
+            try:
+                pids = {key: list(value) for key, value in self.pids.items()}
+            except:
+                pids = {}
+            hanglog.log(
+                "texthook.heartbeat",
+                selected=len(self.selectedhook),
+                selectedhooks=[self.serialkey(key) for key in self.selectedhook],
+                pids=pids,
+                maybe_pids=list(self.maybepids),
+                hwnd=gobject.base.hwnd,
+                gameuid=gobject.base.gameuid,
+                last_output_age=(
+                    "{:.3f}".format(time.time() - self._last_output_time)
+                    if self._last_output_time
+                    else "never"
+                ),
+                last_output=self._last_output_text,
+                foreground=foreground,
+                foreground_pid=foreground_pid,
+                foreground_process=foreground_process,
+                foreground_title=foreground_title,
+            )
 
     @tryprint
     def sysmessage(self, info, sentence):
@@ -733,6 +812,16 @@ class texthook(basetext):
 
     def onremovehook(self, hc, hn: bytes, tp):
         key = (hc, hn.decode("utf8"), tp)
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.onremovehook",
+                hook=hc,
+                hookname=hn.decode("utf8", errors="replace"),
+                processId=tp.processId,
+                addr=tp.addr,
+                selected=len(self.selectedhook),
+                was_selected=key in self.selectedhook,
+            )
         gobject.base.hookselectdialog.removehooksignal.emit(key)
 
     def match_compatibility(self, key, key2):
@@ -754,10 +843,30 @@ class texthook(basetext):
 
     def onnewhook(self, hc, hn: bytes, tp, isembedable):
         if hc in self.hconfig.get("removeforeverhook", []):
+            if hanglog.enabled():
+                hanglog.log(
+                    "texthook.onnewhook.skip_removed_forever",
+                    hook=hc,
+                    hookname=hn.decode("utf8", errors="replace"),
+                    processId=tp.processId,
+                    addr=tp.addr,
+                )
             return
         key = (hc, hn.decode("utf8"), tp)
         autoindex = self.matchkeyindex(key)
         select = autoindex != -1
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.onnewhook",
+                hook=hc,
+                hookname=hn.decode("utf8", errors="replace"),
+                processId=tp.processId,
+                addr=tp.addr,
+                autoindex=autoindex,
+                select=select,
+                selected=len(self.selectedhook),
+                isembedable=isembedable,
+            )
         if select:
             insertindex = len(self.selectedhook) - 1
             for j in range(len(self.selectedhook)):
@@ -888,6 +997,8 @@ class texthook(basetext):
             self.multiselectedcollector.append((key, text))
 
     def handle_output(self, hc, hn: bytes, tp, output):
+        self._last_output_time = time.time()
+        self._last_output_text = output
         if hanglog.enabled():
             hanglog.log(
                 "texthook.handle_output.enter",
