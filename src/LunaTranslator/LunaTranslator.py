@@ -41,6 +41,7 @@ from myutils.utils import (
 )
 from language import Languages
 from myutils.wrapper import threader, tryprint
+from myutils import hanglog
 from gui.showword import searchwordW
 from myutils.hwnd import getExeIcon, getcurrexe
 from textio.textsource.copyboard import copyboard
@@ -371,6 +372,22 @@ class BASEOBJECT(QObject):
     @hwnd.setter
     def hwnd(self, __hwnd):
         self.__hwnd = __hwnd
+        log_engine, log_config = hanglog.active_config()
+        if log_config:
+            try:
+                log_pid = windows.GetWindowThreadProcessId(__hwnd) if __hwnd else 0
+                hanglog.log(
+                    "base.hwnd.set",
+                    engine=log_engine,
+                    hwnd=__hwnd,
+                    pid=log_pid,
+                    process=windows.GetProcessFileName(log_pid) if log_pid else "",
+                    title=windows.GetWindowText(__hwnd) if __hwnd else "",
+                    autoswitchgameuid=self.autoswitchgameuid,
+                    gameuid=self.gameuid,
+                )
+            except:
+                hanglog.log("base.hwnd.set", engine=log_engine, hwnd=__hwnd)
         if not __hwnd:
             self.translation_ui.processismuteed = False
             self.translation_ui.isbindedwindow = False

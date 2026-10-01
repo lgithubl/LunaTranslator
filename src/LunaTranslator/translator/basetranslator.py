@@ -8,6 +8,7 @@ from myutils.wrapper import threader
 from myutils.config import globalconfig, translatorsetting, dynamicapiname
 from myutils.utils import stringfyerror, PriorityQueue
 from myutils.commonbase import ArgsEmptyExc, commonbase
+from myutils import hanglog
 
 
 class Interrupted(Exception):
@@ -362,9 +363,32 @@ class basetrans(commonbase):
             # fmt: off
             callback, contentsolved, waitforresultcallback, is_auto_run, optimization_params = content
             # fmt: on
+            log_enabled = hanglog.enabled(self.config)
+            log_start = time.time()
+            if log_enabled:
+                hanglog.log(
+                    "translator.task.receive",
+                    engine=self.typename,
+                    transtype=self.transtype,
+                    auto=is_auto_run,
+                    wait=waitforresultcallback is not None,
+                    content=contentsolved,
+                )
             if self.onlymanual and is_auto_run:
+                if log_enabled:
+                    hanglog.log(
+                        "translator.task.skip_onlymanual",
+                        engine=self.typename,
+                        content=contentsolved,
+                    )
                 continue
             if self.srclang_1 == self.tgtlang_1:
+                if log_enabled:
+                    hanglog.log(
+                        "translator.task.skip_same_lang",
+                        engine=self.typename,
+                        lang=self.srclang_1,
+                    )
                 callback(None, 0)
                 continue
             try:
@@ -374,9 +398,19 @@ class basetrans(commonbase):
                 )
                 if not checktutukufunction():
                     # 检查请求队列是否空，请求队列有新的请求，则放弃当前请求。但对于内嵌翻译请求，不可以放弃。
+                    if log_enabled:
+                        hanglog.log(
+                            "translator.task.interrupted_before_start",
+                            engine=self.typename,
+                            content=contentsolved,
+                        )
                     continue
 
+                if log_enabled:
+                    hanglog.log("translator.task.reinit.before", engine=self.typename)
                 self.maybeneedreinit()
+                if log_enabled:
+                    hanglog.log("translator.task.reinit.after", engine=self.typename)
 
                 if self.using_gpt_dict:
                     contentsolved = self.__parse_gpt_dict(
@@ -393,17 +427,43 @@ class basetrans(commonbase):
                 if self.transtype == "offline":
                     # 离线翻译例如sakura不要被中断，因为即使中断了，部署的服务仍然在运行，直到请求结束
                     if self.config.get("防卡死保护", False):
+                        hard_timeout = safe_int(self.config.get("任务硬超时", 180), 180)
+                        if log_enabled:
+                            hanglog.log(
+                                "translator.task.offline.start",
+                                engine=self.typename,
+                                hard_timeout=hard_timeout,
+                                content=contentsolved,
+                            )
                         timeoutfunction(
                             func,
                             checktutukufunction=lambda: self.using,
-                            hard_timeout=safe_int(self.config.get("任务硬超时", 180), 180),
+                            hard_timeout=hard_timeout,
                         )
                     else:
+                        if log_enabled:
+                            hanglog.log(
+                                "translator.task.offline.start_unprotected",
+                                engine=self.typename,
+                                content=contentsolved,
+                            )
                         func()
                 else:
+                    if log_enabled:
+                        hanglog.log(
+                            "translator.task.start",
+                            engine=self.typename,
+                            content=contentsolved,
+                        )
                     timeoutfunction(
                         func,
                         checktutukufunction=checktutukufunction,
+                    )
+                if log_enabled:
+                    hanglog.log(
+                        "translator.task.done",
+                        engine=self.typename,
+                        elapsed="{:.3f}".format(time.time() - log_start),
                     )
             except Exception as e:
                 if not (self.using):
@@ -412,12 +472,34 @@ class basetrans(commonbase):
                     msg = str(e)
                 elif isinstance(e, Interrupted):
                     # 因为有新的请求而被打断
+                    if log_enabled:
+                        hanglog.log(
+                            "translator.task.interrupted",
+                            engine=self.typename,
+                            elapsed="{:.3f}".format(time.time() - log_start),
+                            content=contentsolved,
+                        )
                     continue
                 elif isinstance(e, TaskTimeout):
                     msg = "翻译任务超时，已跳过本次请求"
                     self.needreinit = True
+                    if log_enabled:
+                        hanglog.log(
+                            "translator.task.timeout",
+                            engine=self.typename,
+                            elapsed="{:.3f}".format(time.time() - log_start),
+                            content=contentsolved,
+                        )
                 else:
                     print_exc()
                     msg = stringfyerror(e)
                     self.needreinit = True
+                    if log_enabled:
+                        hanglog.log(
+                            "translator.task.exception",
+                            engine=self.typename,
+                            elapsed="{:.3f}".format(time.time() - log_start),
+                            error=msg,
+                            content=contentsolved,
+                        )
                 callback(msg, 0, True)

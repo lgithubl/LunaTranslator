@@ -22,6 +22,7 @@ from myutils.utils import (
     find_or_create_uid_for_emu,
 )
 from myutils.kanjitrans import kanjitrans
+from myutils import hanglog
 from myutils.hwnd import test_injectable, ListProcess
 from myutils.wrapper import threader, tryprint
 from traceback import print_exc
@@ -341,18 +342,27 @@ class texthook(basetext):
         return (r"C:\Windows\explorer.exe",)
 
     def connecthwnd(self, hwnd, force=False):
+        log_engine, log_config = self.waitfortranslation_log_config()
         if (
             gobject.base.AttachProcessDialog
             and gobject.base.AttachProcessDialog.isVisible()
         ):
+            if log_config:
+                hanglog.log("texthook.connect.skip_attach_dialog", engine=log_engine, hwnd=hwnd)
             return
         pid = windows.GetWindowThreadProcessId(hwnd)
         if pid == os.getpid():
+            if log_config:
+                hanglog.log("texthook.connect.skip_self", engine=log_engine, hwnd=hwnd, pid=pid)
             return
         name_ = windows.GetProcessFileName(pid)
         if not name_:
+            if log_config:
+                hanglog.log("texthook.connect.skip_no_process", engine=log_engine, hwnd=hwnd, pid=pid)
             return
         if name_ in self.autohookblacklist:
+            if log_config:
+                hanglog.log("texthook.connect.skip_blacklist", engine=log_engine, hwnd=hwnd, pid=pid, process=name_)
             return
         uid, reflist = findgameuidofpath(name_)
         if not uid:
@@ -362,16 +372,42 @@ class texthook(basetext):
                 )
                 savehook_new_list.insert(0, uid)
             else:
+                if log_config:
+                    hanglog.log(
+                        "texthook.connect.skip_no_uid",
+                        engine=log_engine,
+                        hwnd=hwnd,
+                        pid=pid,
+                        process=name_,
+                        title=windows.GetWindowText(hwnd),
+                    )
                 return
         pids = ListProcess(name_)
         if self.ending:
+            if log_config:
+                hanglog.log("texthook.connect.skip_ending", engine=log_engine, hwnd=hwnd, pid=pid, process=name_)
             return
         if len(self.pids[self.gameuid]):
+            if log_config:
+                hanglog.log("texthook.connect.skip_already_bound", engine=log_engine, hwnd=hwnd, pid=pid, process=name_)
             return
         if not globalconfig.get("startgamenototop", True):
             idx = reflist.index(uid)
             reflist.insert(0, reflist.pop(idx))
+        if log_config:
+            hanglog.log(
+                "texthook.connect.start",
+                engine=log_engine,
+                hwnd=hwnd,
+                pid=pid,
+                process=name_,
+                uid=uid,
+                pids=pids,
+                title=windows.GetWindowText(hwnd),
+            )
         self.start(hwnd, pids, name_, uid, autostart=True)
+        if log_config:
+            hanglog.log("texthook.connect.done", engine=log_engine, hwnd=hwnd, pid=pid, process=name_, uid=uid)
         return True
 
     def hwndChanged(self, hwnd):
@@ -385,6 +421,17 @@ class texthook(basetext):
             try:
                 hwnd = windows.GetForegroundWindow()
                 hwnd = windows.GetAncestor(hwnd)
+                log_engine, log_config = self.waitfortranslation_log_config()
+                if log_config:
+                    pid = windows.GetWindowThreadProcessId(hwnd)
+                    hanglog.log(
+                        "texthook.autohook.foreground",
+                        engine=log_engine,
+                        hwnd=hwnd,
+                        pid=pid,
+                        process=windows.GetProcessFileName(pid),
+                        title=windows.GetWindowText(hwnd),
+                    )
                 if self.connecthwnd(hwnd):
                     break
             except:
@@ -574,16 +621,50 @@ class texthook(basetext):
 
     @threader
     def getembedtext(self, text: str, tp):
+        log_engine, log_config = self.waitfortranslation_log_config()
+        if log_config:
+            hanglog.log(
+                "texthook.embed.receive",
+                engine=log_engine,
+                processId=tp.processId,
+                addr=tp.addr,
+                text=text,
+            )
         if not self.isautorunning:
+            if log_config:
+                hanglog.log("texthook.embed.autorun_off", engine=log_engine, text=text)
             return self.embedcallback(text, "", tp)
         trans = self.waitfortranslation(text)
         if not trans:
             trans = ""
         elif not self.__safechecktransresult(text, trans):
+            if log_config:
+                hanglog.log(
+                    "texthook.embed.safecheck_failed",
+                    engine=log_engine,
+                    text=text,
+                    trans=trans,
+                )
             trans = ""
         if self.embedconfig.get("trans_kanji", False):
             trans = kanjitrans(zhconv.convert(trans, "zh-tw"))
+        if log_config:
+            hanglog.log(
+                "texthook.embed.callback.before",
+                engine=log_engine,
+                processId=tp.processId,
+                addr=tp.addr,
+                text=text,
+                trans=trans,
+            )
         self.embedcallback(text, trans, tp)
+        if log_config:
+            hanglog.log(
+                "texthook.embed.callback.after",
+                engine=log_engine,
+                processId=tp.processId,
+                addr=tp.addr,
+            )
 
     def embedcallback(self, text: str, trans: str, tp: ThreadParam):
         trans = self.splitembedlines(trans)

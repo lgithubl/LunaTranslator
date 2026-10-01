@@ -13,6 +13,7 @@ from translator.gptcommon import (
 from language import Languages
 import NativeUtils
 from gui.customparams import *
+from myutils import hanglog
 
 
 def _maybe_override_local_llama_port(url: str):
@@ -276,6 +277,8 @@ Translate the following text into {}. Note that you must ONLY output the transla
         return prompt_version
 
     def translate(self, query_: GptTextWithDict):
+        log_enabled = hanglog.enabled(self.config)
+        log_start = time.time()
         self.checkempty("API接口地址")
 
         gpt_dict = query_.dictionary
@@ -308,6 +311,16 @@ Translate the following text into {}. Note that you must ONLY output the transla
                 safe_int(self.config.get("连接超时", 10), 10),
                 safe_int(self.config.get("读取超时", 60), 60),
             )
+        if log_enabled:
+            hanglog.log(
+                "sakura.request.start",
+                url=apitype.finalurl(),
+                stream=usingstream,
+                model=self.config["model"],
+                timeout=request_kwargs.get("timeout"),
+                prompt=prompt_version,
+                query=query,
+            )
         try:
             response = self.proxysession.post(
                 apitype.finalurl(),
@@ -317,7 +330,20 @@ Translate the following text into {}. Note that you must ONLY output the transla
                 **request_kwargs,
             )
         except requests.exceptions.RequestException:
+            if log_enabled:
+                hanglog.log(
+                    "sakura.request.exception",
+                    elapsed="{:.3f}".format(time.time() - log_start),
+                    url=apitype.finalurl(),
+                )
             raise ValueError("无法连接，可能未正确部署Sakura模型")
+        if log_enabled:
+            hanglog.log(
+                "sakura.response.headers",
+                elapsed="{:.3f}".format(time.time() - log_start),
+                status=getattr(response, "status_code", ""),
+                url=getattr(response, "url", apitype.finalurl()),
+            )
         getmodelhook = []
         try:
             if usingstream:
@@ -335,7 +361,20 @@ Translate the following text into {}. Note that you must ONLY output the transla
                 )
                 yield respmessage
         except requests.exceptions.RequestException:
+            if log_enabled:
+                hanglog.log(
+                    "sakura.parse.exception",
+                    elapsed="{:.3f}".format(time.time() - log_start),
+                    status=getattr(response, "status_code", ""),
+                )
             raise ValueError("无法连接，可能未正确部署Sakura模型")
+        if log_enabled:
+            hanglog.log(
+                "sakura.parse.done",
+                elapsed="{:.3f}".format(time.time() - log_start),
+                status=getattr(response, "status_code", ""),
+                response=respmessage,
+            )
         self.__model = getmodelhook[0] if getmodelhook else self.config["model"]
         if not (query.strip() and respmessage.strip()):
             return

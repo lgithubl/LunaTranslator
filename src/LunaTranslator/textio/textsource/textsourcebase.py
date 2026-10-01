@@ -5,6 +5,7 @@ from myutils.config import globalconfig, savehook_new_data, translatorsetting
 from myutils.utils import autosql
 from myutils.wrapper import threader
 from myutils.mecab import punctuations
+from myutils import hanglog
 from sometypes import TranslateResult
 
 
@@ -116,8 +117,24 @@ class basetext:
                 return 180
         return None
 
+    def waitfortranslation_log_config(self):
+        engines = []
+        top = globalconfig.get("toppest_translator")
+        if top:
+            engines.append(top)
+        engines.extend(globalconfig.get("fix_translate_rank_rank", []))
+        for engine in engines:
+            config = translatorsetting.get(engine, {}).get("args", {})
+            if hanglog.enabled(config):
+                return engine, config
+        return None, None
+
     def waitfortranslation(self, text):
         resultwaitor = queue.Queue()
+        log_engine, log_config = self.waitfortranslation_log_config()
+        log_start = time.time()
+        if log_config:
+            hanglog.log("waitfortranslation.start", engine=log_engine, text=text)
         self.textgetmethod(
             text,
             is_auto_run=True,
@@ -128,7 +145,22 @@ class basetext:
         try:
             tsres: TranslateResult = resultwaitor.get(timeout=timeout)
         except queue.Empty:
+            if log_config:
+                hanglog.log(
+                    "waitfortranslation.timeout",
+                    engine=log_engine,
+                    timeout=timeout,
+                    elapsed="{:.3f}".format(time.time() - log_start),
+                    text=text,
+                )
             return None
+        if log_config:
+            hanglog.log(
+                "waitfortranslation.done",
+                engine=log_engine,
+                elapsed="{:.3f}".format(time.time() - log_start),
+                result=tsres.result,
+            )
         return tsres.result
 
     @property
