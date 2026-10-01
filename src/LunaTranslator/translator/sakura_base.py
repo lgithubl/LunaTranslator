@@ -1,4 +1,4 @@
-from translator.basetranslator import basetrans, GptTextWithDict, GptDict
+from translator.basetranslator import basetrans, GptTextWithDict, GptDict, safe_int
 import requests
 import time
 from urllib.parse import urlsplit, urlunsplit
@@ -302,13 +302,22 @@ Translate the following text into {}. Note that you must ONLY output the transla
             extraheader,
         )
         _json = common_create_gpt_data(self.config, messages, extrabody)
-        response = self.proxysession.post(
-            apitype.finalurl(),
-            headers=headers,
-            json=_json,
-            stream=usingstream,
-            timeout=(10, 60),
-        )
+        request_kwargs = {}
+        if self.config.get("防卡死保护", True):
+            request_kwargs["timeout"] = (
+                safe_int(self.config.get("连接超时", 10), 10),
+                safe_int(self.config.get("读取超时", 60), 60),
+            )
+        try:
+            response = self.proxysession.post(
+                apitype.finalurl(),
+                headers=headers,
+                json=_json,
+                stream=usingstream,
+                **request_kwargs,
+            )
+        except requests.exceptions.RequestException:
+            raise ValueError("无法连接，可能未正确部署Sakura模型")
         getmodelhook = []
         try:
             if usingstream:

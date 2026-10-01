@@ -1,7 +1,7 @@
 import gobject, queue
 import json, time, re
 from traceback import print_exc
-from myutils.config import globalconfig, savehook_new_data
+from myutils.config import globalconfig, savehook_new_data, translatorsetting
 from myutils.utils import autosql
 from myutils.wrapper import threader
 from myutils.mecab import punctuations
@@ -100,6 +100,22 @@ class basetext:
             return
         self.textgetmethod(*arg, **kwarg)
 
+    def waitfortranslation_timeout(self):
+        engines = []
+        top = globalconfig.get("toppest_translator")
+        if top:
+            engines.append(top)
+        engines.extend(globalconfig.get("fix_translate_rank_rank", []))
+        for engine in engines:
+            config = translatorsetting.get(engine, {}).get("args", {})
+            if not config.get("防卡死保护", False):
+                continue
+            try:
+                return max(1, int(config.get("同步等待超时", 180)))
+            except:
+                return 180
+        return None
+
     def waitfortranslation(self, text):
         resultwaitor = queue.Queue()
         self.textgetmethod(
@@ -108,7 +124,11 @@ class basetext:
             waitforresultcallback=resultwaitor.put,
             waitforresultcallbackengine=globalconfig.get("toppest_translator"),
         )
-        tsres: TranslateResult = resultwaitor.get()
+        timeout = self.waitfortranslation_timeout()
+        try:
+            tsres: TranslateResult = resultwaitor.get(timeout=timeout)
+        except queue.Empty:
+            return None
         return tsres.result
 
     @property

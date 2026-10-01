@@ -14,6 +14,10 @@ class Interrupted(Exception):
     pass
 
 
+class TaskTimeout(Exception):
+    pass
+
+
 class GptDictItem:
     def __init__(self, d: dict = None):
         d = d if d else {}
@@ -77,10 +81,15 @@ class Threadwithresult(Thread):
             self.exception = e
         self.isInterrupted = False
 
-    def get_result(self, checktutukufunction=None):
+    def get_result(self, checktutukufunction=None, hard_timeout=None):
         # Thread.join(self,timeout)
         # 不再超时等待，只检查是否是最后一个请求，若是则无限等待，否则立即放弃。
-        while checktutukufunction and checktutukufunction() and self.isInterrupted:
+        start = time.time()
+        while self.isInterrupted:
+            if hard_timeout and time.time() - start >= hard_timeout:
+                raise TaskTimeout()
+            if checktutukufunction and not checktutukufunction():
+                break
             self.join(0.1)
 
         if self.isInterrupted:
@@ -91,10 +100,17 @@ class Threadwithresult(Thread):
             return self.result
 
 
-def timeoutfunction(func, checktutukufunction=None):
+def timeoutfunction(func, checktutukufunction=None, hard_timeout=None):
     t = Threadwithresult(func)
     t.start()
-    return t.get_result(checktutukufunction)
+    return t.get_result(checktutukufunction, hard_timeout=hard_timeout)
+
+
+def safe_int(value, default, minimum=1):
+    try:
+        return max(minimum, int(value))
+    except:
+        return default
 
 
 class basetrans(commonbase):
@@ -376,7 +392,14 @@ class basetrans(commonbase):
                 )
                 if self.transtype == "offline":
                     # 离线翻译例如sakura不要被中断，因为即使中断了，部署的服务仍然在运行，直到请求结束
-                    func()
+                    if self.config.get("防卡死保护", False):
+                        timeoutfunction(
+                            func,
+                            checktutukufunction=lambda: self.using,
+                            hard_timeout=safe_int(self.config.get("任务硬超时", 180), 180),
+                        )
+                    else:
+                        func()
                 else:
                     timeoutfunction(
                         func,
@@ -390,6 +413,9 @@ class basetrans(commonbase):
                 elif isinstance(e, Interrupted):
                     # 因为有新的请求而被打断
                     continue
+                elif isinstance(e, TaskTimeout):
+                    msg = "翻译任务超时，已跳过本次请求"
+                    self.needreinit = True
                 else:
                     print_exc()
                     msg = stringfyerror(e)
