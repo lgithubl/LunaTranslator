@@ -1,7 +1,7 @@
 import gobject, queue
 import json, time, re
 from traceback import print_exc
-from myutils.config import globalconfig, savehook_new_data, translatorsetting
+from myutils.config import globalconfig, savehook_new_data
 from myutils.utils import autosql
 from myutils.wrapper import threader
 from myutils.mecab import punctuations
@@ -118,16 +118,7 @@ class basetext:
         return None
 
     def waitfortranslation_log_config(self):
-        engines = []
-        top = globalconfig.get("toppest_translator")
-        if top:
-            engines.append(top)
-        engines.extend(globalconfig.get("fix_translate_rank_rank", []))
-        for engine in engines:
-            config = translatorsetting.get(engine, {}).get("args", {})
-            if hanglog.enabled(config):
-                return engine, config
-        return None, None
+        return hanglog.active_config()
 
     def waitfortranslation(self, text):
         resultwaitor = queue.Queue()

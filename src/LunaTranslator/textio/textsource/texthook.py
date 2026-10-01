@@ -860,26 +860,67 @@ class texthook(basetext):
                 self.multiselectedcollector.clear()
 
     def dispatchtextlines(self, keyandtexts: list):
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.dispatch_lines.enter",
+                count=len(keyandtexts),
+                selected=len(self.selectedhook),
+            )
         try:
             keyandtexts.sort(key=lambda xx: self.selectedhook.index(xx[0]))
         except:
             pass
         _collector = globalconfig["multihookmergeby"].join([_[1] for _ in keyandtexts])
+        if hanglog.enabled():
+            hanglog.log("texthook.dispatch_lines.merged", text=_collector)
         self.dispatchtext(_collector)
 
     def dispatchtext_multiline_delayed(self, key, text):
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.dispatch_multiline_delayed",
+                selected=len(self.selectedhook),
+                pending=len(self.multiselectedcollector),
+                text=text,
+            )
         with self.multiselectedcollectorlock:
             self.lastflushtime = time.time()
             self.multiselectedcollector.append((key, text))
 
     def handle_output(self, hc, hn: bytes, tp, output):
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.handle_output.enter",
+                hook=hc,
+                hookname=hn.decode("utf8", errors="replace"),
+                processId=tp.processId,
+                addr=tp.addr,
+                selected=len(self.selectedhook),
+                output=output,
+            )
         key = (hc, hn.decode("utf8"), tp)
         if key in self.selectedhook:
             if len(self.selectedhook) == 1:
                 self.dispatchtext(output)
             else:
                 self.dispatchtext_multiline_delayed(key, output)
+        elif hanglog.enabled():
+            hanglog.log(
+                "texthook.handle_output.not_selected",
+                hook=hc,
+                hookname=hn.decode("utf8", errors="replace"),
+                processId=tp.processId,
+                addr=tp.addr,
+                output=output,
+            )
         gobject.base.hookselectdialog.update_item_new_line.emit(key, output)
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.handle_output.exit",
+                hook=hc,
+                processId=tp.processId,
+                addr=tp.addr,
+            )
 
     def serialkey(self, key):
         hc, hn, tp = key
@@ -897,10 +938,21 @@ class texthook(basetext):
         return xx
 
     def dispatchtext(self, text):
+        if hanglog.enabled():
+            hanglog.log("texthook.dispatchtext.enter", text=text)
         self.runonce_line = text
         if len(text) > globalconfig.get("maxOutputSize", 10000):
+            if hanglog.enabled():
+                hanglog.log(
+                    "texthook.dispatchtext.drop_max_output",
+                    maxOutputSize=globalconfig.get("maxOutputSize", 10000),
+                    text=text,
+                )
             return
-        return super().dispatchtext(text, isFromHook=True)
+        ret = super().dispatchtext(text, isFromHook=True)
+        if hanglog.enabled():
+            hanglog.log("texthook.dispatchtext.exit", text=text)
+        return ret
 
     def gettextonce(self):
         return self.runonce_line

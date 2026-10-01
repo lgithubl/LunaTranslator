@@ -581,7 +581,25 @@ class BASEOBJECT(QObject):
         isRefresh=False,
         skippreprocess=False,
     ):
+        log_enabled = hanglog.enabled()
+        log_start = time.time()
+        if log_enabled:
+            hanglog.log(
+                "textgetmethod.before_lock",
+                auto=is_auto_run,
+                wait=waitforresultcallback is not None,
+                from_hook=isFromHook,
+                statusok=statusok,
+                refresh=isRefresh,
+                text=text,
+            )
         with self.solvegottextlock:
+            if log_enabled:
+                hanglog.log(
+                    "textgetmethod.after_lock",
+                    elapsed="{:.3f}".format(time.time() - log_start),
+                    text=text,
+                )
             succ = self.textgetmethod_1(
                 text,
                 is_auto_run=is_auto_run,
@@ -597,6 +615,19 @@ class BASEOBJECT(QObject):
             )
             if waitforresultcallback and not succ:
                 waitforresultcallback(TranslateResult())
+            if log_enabled:
+                hanglog.log(
+                    "textgetmethod.inner_done",
+                    elapsed="{:.3f}".format(time.time() - log_start),
+                    success=succ,
+                    text=text,
+                )
+        if log_enabled:
+            hanglog.log(
+                "textgetmethod.after_unlock",
+                elapsed="{:.3f}".format(time.time() - log_start),
+                text=text,
+            )
 
     def __erroroutput(self, klass, erroroutput, _showrawfunction, e, t):
 
@@ -621,32 +652,62 @@ class BASEOBJECT(QObject):
         isRefresh=False,
         skippreprocess=False,
     ):
+        log_enabled = hanglog.enabled()
+        log_start = time.time()
+        if log_enabled:
+            hanglog.log(
+                "textgetmethod_1.enter",
+                auto=is_auto_run,
+                wait=waitforresultcallback is not None,
+                from_hook=isFromHook,
+                statusok=statusok,
+                refresh=isRefresh,
+                text=text,
+            )
         if not text:
+            if log_enabled:
+                hanglog.log("textgetmethod_1.skip_empty", text=text)
             return
         if not text.strip():
+            if log_enabled:
+                hanglog.log("textgetmethod_1.skip_blank", text=text)
             return
         if is_auto_run and text == self.currenttext_raw and statusok == self.statusok:
+            if log_enabled:
+                hanglog.log("textgetmethod_1.skip_same_raw", text=text)
             return
         origin = text
         __erroroutput = functools.partial(self.__erroroutput, None, erroroutput, None)
         currentsignature = uuid.uuid4() if not isRefresh else self.currentsignature
         try:
+            if log_enabled:
+                hanglog.log("textgetmethod_1.postsolve.before", text=text)
             text = POSTSOLVE(
                 text,
                 isEx=waitforresultcallback,
                 isFromHook=isFromHook,
                 skippreprocess=skippreprocess,
             )
+            if log_enabled:
+                hanglog.log("textgetmethod_1.postsolve.after", origin=origin, text=text)
             gobject.base.showandsolvesig.emit(origin, text)
             if not text:
+                if log_enabled:
+                    hanglog.log("textgetmethod_1.skip_postsolve_empty", origin=origin)
                 return
             if not text.strip():
+                if log_enabled:
+                    hanglog.log("textgetmethod_1.skip_postsolve_blank", origin=origin)
                 return
         except Exception as e:
+            if log_enabled:
+                hanglog.log("textgetmethod_1.postsolve.exception", error=stringfyerror(e), text=origin)
             __erroroutput(stringfyerror(e), TextType.Error_origin)
             return
 
         if is_auto_run and text == self.currenttext and statusok == self.statusok:
+            if log_enabled:
+                hanglog.log("textgetmethod_1.skip_same_current", text=text)
             return
         self.currentsignature = currentsignature
         if is_auto_run and (
@@ -661,6 +722,12 @@ class BASEOBJECT(QObject):
             if statusok and not isRefresh:
                 self.transhis.getnewsentencesignal.emit(text)
             self.maybesetedittext(text)
+            if log_enabled:
+                hanglog.log(
+                    "textgetmethod_1.skip_length_done",
+                    elapsed="{:.3f}".format(time.time() - log_start),
+                    text=text,
+                )
             return
 
         _showrawfunction_unsafe = None
@@ -697,10 +764,18 @@ class BASEOBJECT(QObject):
         self.maybesetedittext(text)
 
         if not waitforresultcallback and not globalconfig.get("showfanyi", True):
+            if log_enabled:
+                hanglog.log("textgetmethod_1.show_raw_only", text=text)
             return _showrawfunction()
 
+        if log_enabled:
+            hanglog.log("textgetmethod_1.solvebeforetrans.before", text=text)
         text_solved, optimization_params = self.solvebeforetrans(text)
+        if log_enabled:
+            hanglog.log("textgetmethod_1.solvebeforetrans.after", text_solved=text_solved)
         if not text_solved:
+            if log_enabled:
+                hanglog.log("textgetmethod_1.no_text_solved", text=text)
             return _showrawfunction()
 
         maybehaspremt = {}
@@ -773,6 +848,13 @@ class BASEOBJECT(QObject):
             _showrawfunction = None
         read_trans_once_check = []
         for engine in real_fix_rank:
+            if log_enabled:
+                hanglog.log(
+                    "textgetmethod_1.create_translate_task.before",
+                    engine=engine,
+                    text=text,
+                    text_solved=text_solved,
+                )
             if engine in globalconfig["fanyi"]:
                 _colork = engine
             else:
@@ -791,6 +873,18 @@ class BASEOBJECT(QObject):
                 read_trans_once_check=read_trans_once_check,
                 erroroutput=erroroutput,
                 statusok=statusok,
+            )
+            if log_enabled:
+                hanglog.log(
+                    "textgetmethod_1.create_translate_task.after",
+                    engine=engine,
+                    text=text,
+                )
+        if log_enabled:
+            hanglog.log(
+                "textgetmethod_1.done",
+                elapsed="{:.3f}".format(time.time() - log_start),
+                text=text,
             )
         return True
 

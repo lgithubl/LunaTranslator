@@ -9,26 +9,21 @@ _lock = threading.Lock()
 _max_bytes = 2 * 1024 * 1024
 
 
-def enabled(config):
+def enabled(config=None):
     try:
-        return bool(config and config.get("诊断日志", False))
+        from myutils.config import globalconfig
+
+        return bool(globalconfig.get("diagnostic_log", False))
     except:
         return False
 
 
 def active_config():
     try:
-        from myutils.config import globalconfig, translatorsetting
+        from myutils.config import globalconfig
 
-        engines = []
-        top = globalconfig.get("toppest_translator")
-        if top:
-            engines.append(top)
-        engines.extend(globalconfig.get("fix_translate_rank_rank", []))
-        for engine in engines:
-            config = translatorsetting.get(engine, {}).get("args", {})
-            if enabled(config):
-                return engine, config
+        if enabled():
+            return "global", globalconfig
     except:
         pass
     return None, None
@@ -67,6 +62,8 @@ def _rotate_if_needed(path):
 
 def log(tag, **fields):
     try:
+        if not enabled():
+            return
         path = _path()
         now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         millis = int((time.time() % 1) * 1000)

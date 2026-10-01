@@ -150,6 +150,17 @@ def gethookgrid(dic=None):
         dic = globalconfig
     grids = [
         [D_getdoclink("hooksettings.html")] if isglobal else None,
+        (
+            [
+                "诊断日志",
+                D_getsimpleswitch(globalconfig, "diagnostic_log"),
+                "",
+                "日志文件",
+                gobject.getcachedir("logs/hang-diagnostics.log"),
+            ]
+            if isglobal
+            else None
+        ),
         [
             "代码页",
             (

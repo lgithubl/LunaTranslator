@@ -1,5 +1,6 @@
 {
     "showna": true,
+    "diagnostic_log": false,
     "llama.cpp": {},
     "screenshot_savepath": "",
     "history": {
