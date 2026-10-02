@@ -325,13 +325,35 @@ class texthook(basetext):
                 pids = {key: list(value) for key, value in self.pids.items()}
             except:
                 pids = {}
+            try:
+                target_pid = windows.GetWindowThreadProcessId(gobject.base.hwnd)
+                target_process = (
+                    windows.GetProcessFileName(target_pid) if target_pid else ""
+                )
+                target_title = (
+                    windows.GetWindowText(gobject.base.hwnd) if gobject.base.hwnd else ""
+                )
+            except:
+                target_pid = 0
+                target_process = ""
+                target_title = ""
+            try:
+                bound_pids = list(self.pids.get(self.gameuid, []))
+                alive_pids = NativeUtils.collect_running_pids(bound_pids)
+            except:
+                bound_pids = []
+                alive_pids = []
             hanglog.log(
                 "texthook.heartbeat",
                 selected=len(self.selectedhook),
                 selectedhooks=[self.serialkey(key) for key in self.selectedhook],
                 pids=pids,
+                alive_pids=alive_pids,
                 maybe_pids=list(self.maybepids),
                 hwnd=gobject.base.hwnd,
+                hwnd_pid=target_pid,
+                hwnd_process=target_process,
+                hwnd_title=target_title,
                 gameuid=gobject.base.gameuid,
                 last_output_age=(
                     "{:.3f}".format(time.time() - self._last_output_time)
