@@ -330,6 +330,25 @@ def uisetting(self):
                             ]
                         ),
                     ],
+                    [
+                        "切回游戏延迟置顶(ms)",
+                        D_getspinbox(
+                            0,
+                            5000,
+                            globalconfig,
+                            "topmost_foreground_delay_ms",
+                            default=500,
+                        ),
+                        "",
+                        "置顶刷新间隔(ms)",
+                        D_getspinbox(
+                            500,
+                            60000,
+                            globalconfig,
+                            "topmost_refresh_ms",
+                            default=5000,
+                        ),
+                    ],
                 ),
             ),
         ],

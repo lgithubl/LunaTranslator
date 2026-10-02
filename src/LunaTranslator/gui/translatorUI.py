@@ -13,6 +13,7 @@ from myutils.config import (
     savehook_new_list,
     translatorsetting,
 )
+from myutils import hanglog
 from textio.textsource.texthook import texthook
 from gui.setting.about import get_about_info
 from myutils.magpie_builtin import MagpieBuiltin, AdapterService
@@ -100,63 +101,84 @@ class TranslatorWindow(resizableframeless):
         self.__tracehwnd = None
 
         def __():
+            try:
+                if not globalconfig.get("movefollow", True):
+                    self.__lastpos = None
+                    return
+                if self.isdoingsomething():
+                    self.__lastpos = None
+                    return
 
-            if not globalconfig.get("movefollow", True):
-                self.__lastpos = None
-                return
-            if self.isdoingsomething():
-                self.__lastpos = None
-                return
-
-            hwnd = gobject.base.hwnd
-            if not hwnd:
-                return
-            if hwnd != self.__tracehwnd:
-                self.__tracehwnd = hwnd
-                self.__lastpos = None
-                return
-            rect = windows.GetWindowRect(hwnd)
-            if not rect:
-                self.__lastpos = None
-                return
-            if not NativeUtils.IsWindowViewable(hwnd):
-                self.__lastpos = None
-                return
-            rate = self.devicePixelRatioF()
-            rect = QRect(
-                int(rect[0] / rate),
-                int(rect[1] / rate),
-                int((rect[2] - rect[0]) / rate),
-                int((rect[3] - rect[1]) / rate),
-            )
-            if not self.__lastpos:
-                self.__lastpos = rect
-                self.__tracepos = self.pos()
+                hwnd = gobject.base.hwnd
+                if not hwnd:
+                    return
+                if hwnd != self.__tracehwnd:
+                    self.__tracehwnd = hwnd
+                    self.__lastpos = None
+                    if hanglog.enabled():
+                        hanglog.log("ui.trace.hwnd_change", hwnd=hwnd)
+                    return
+                if hanglog.enabled() and time.time() - self._last_trace_log > 1:
+                    self._last_trace_log = time.time()
+                    hanglog.log("ui.trace.before_getrect", hwnd=hwnd, winid=self.winid)
+                rect = windows.GetWindowRect(hwnd)
+                if not rect:
+                    self.__lastpos = None
+                    if hanglog.enabled():
+                        hanglog.log("ui.trace.no_rect", hwnd=hwnd)
+                    return
+                if not NativeUtils.IsWindowViewable(hwnd):
+                    self.__lastpos = None
+                    if hanglog.enabled():
+                        hanglog.log("ui.trace.not_viewable", hwnd=hwnd, rect=rect)
+                    return
+                rate = self.devicePixelRatioF()
+                rect = QRect(
+                    int(rect[0] / rate),
+                    int(rect[1] / rate),
+                    int((rect[2] - rect[0]) / rate),
+                    int((rect[3] - rect[1]) / rate),
+                )
+                if not self.__lastpos:
+                    self.__lastpos = rect
+                    self.__tracepos = self.pos()
+                    try:
+                        gobject.base.textsource.starttrace(rect.topLeft())
+                    except:
+                        pass
+                    return
+                if (rect.topLeft() == QPoint(0, 0)) or (
+                    rect.size() != self.__lastpos.size()
+                ):
+                    self.__lastpos = rect
+                    return
                 try:
-                    gobject.base.textsource.starttrace(rect.topLeft())
+                    gobject.base.textsource.traceoffset(rect.topLeft())
                 except:
                     pass
-                return
-            if (rect.topLeft() == QPoint(0, 0)) or (
-                rect.size() != self.__lastpos.size()
-            ):
-                self.__lastpos = rect
-                return
-            try:
-                gobject.base.textsource.traceoffset(rect.topLeft())
-            except:
-                pass
-            if windows.MonitorFromWindow(hwnd) != windows.MonitorFromWindow(self.winid):
+                if hanglog.enabled() and time.time() - self._last_trace_log > 1:
+                    self._last_trace_log = time.time()
+                    hanglog.log("ui.trace.before_monitor", hwnd=hwnd, winid=self.winid)
+                if windows.MonitorFromWindow(hwnd) != windows.MonitorFromWindow(self.winid):
+                    self.__lastpos = None
+                    if hanglog.enabled():
+                        hanglog.log("ui.trace.monitor_mismatch", hwnd=hwnd, winid=self.winid)
+                    return
+                if (
+                    globalconfig.get("verticalhorizontal", False)
+                    + globalconfig.get("top_align", 0)
+                    != 1
+                ):
+                    pos = self.__tracepos - self.__lastpos.topLeft() + rect.topLeft()
+                    if hanglog.enabled() and time.time() - self._last_trace_log > 1:
+                        self._last_trace_log = time.time()
+                        hanglog.log("ui.trace.before_move", hwnd=hwnd, pos=pos)
+                    self.safemove(pos)
+            except Exception as e:
                 self.__lastpos = None
-                return
-            if (
-                globalconfig.get("verticalhorizontal", False)
-                + globalconfig.get("top_align", 0)
-                != 1
-            ):
-                self.safemove(
-                    self.__tracepos - self.__lastpos.topLeft() + rect.topLeft()
-                )
+                if hanglog.enabled():
+                    hanglog.log("ui.trace.exception", error=stringfyerror(e))
+                print_exc()
 
         t = QTimer(self)
         t.setInterval(10)
@@ -697,6 +719,8 @@ class TranslatorWindow(resizableframeless):
     def canceltop(self):
         if not self.istopmost():
             return
+        if hanglog.enabled():
+            hanglog.log("ui.top.canceltop.before", winid=self.winid)
         windows.SetWindowPos(
             self.winid,
             windows.HWND_NOTOPMOST,
@@ -706,6 +730,8 @@ class TranslatorWindow(resizableframeless):
             0,
             windows.SWP_NOACTIVATE | windows.SWP_NOSIZE | windows.SWP_NOMOVE,
         )
+        if hanglog.enabled():
+            hanglog.log("ui.top.canceltop.after", winid=self.winid)
 
     def istopmost(self):
         return bool(
@@ -714,6 +740,8 @@ class TranslatorWindow(resizableframeless):
         )
 
     def settop(self):
+        if hanglog.enabled():
+            hanglog.log("ui.top.settop.before", winid=self.winid)
         windows.SetWindowPos(
             self.winid,
             windows.HWND_TOPMOST,
@@ -723,6 +751,9 @@ class TranslatorWindow(resizableframeless):
             0,
             windows.SWP_NOACTIVATE | windows.SWP_NOSIZE | windows.SWP_NOMOVE,
         )
+        self._last_settop_time = time.time()
+        if hanglog.enabled():
+            hanglog.log("ui.top.settop.after", winid=self.winid)
 
     def checksettop(self):
         def __magpid():
@@ -737,19 +768,58 @@ class TranslatorWindow(resizableframeless):
                 return windows.GetWindowThreadProcessId(magwindow)
 
         with self.setontopthread_lock:
-            if not globalconfig.get("keepontop", True):
-                return self.canceltop()
-            hwnd = windows.GetForegroundWindow()
-            _focusp = windows.GetWindowThreadProcessId(hwnd)
-            if globalconfig.get("focusnotop", False):
-                try:
-                    p_pids = windows.GetWindowThreadProcessId(gobject.base.hwnd)
-                    if p_pids and _focusp not in (p_pids, os.getpid(), __magpid()):
-                        return self.canceltop()
-                except:
-                    pass
-            if not (_focusp == os.getpid() and self.istopmost()):
-                self.settop()
+            try:
+                if not globalconfig.get("keepontop", True):
+                    return self.canceltop()
+                if hanglog.enabled():
+                    hanglog.log("ui.top.check.enter", winid=self.winid)
+                hwnd = windows.GetForegroundWindow()
+                _focusp = windows.GetWindowThreadProcessId(hwnd)
+                now = time.time()
+                if hwnd != self._last_foreground_hwnd:
+                    self._last_foreground_hwnd = hwnd
+                    self._foreground_changed_at = now
+                    if hanglog.enabled():
+                        hanglog.log(
+                            "ui.top.foreground_change",
+                            hwnd=hwnd,
+                            focus_pid=_focusp,
+                            game_hwnd=gobject.base.hwnd,
+                        )
+                if globalconfig.get("focusnotop", False):
+                    try:
+                        p_pids = windows.GetWindowThreadProcessId(gobject.base.hwnd)
+                        if p_pids and _focusp not in (p_pids, os.getpid(), __magpid()):
+                            return self.canceltop()
+                    except:
+                        pass
+                delay = globalconfig.get("topmost_foreground_delay_ms", 500) / 1000
+                if hwnd == gobject.base.hwnd and now - self._foreground_changed_at < delay:
+                    if hanglog.enabled():
+                        hanglog.log(
+                            "ui.top.defer_after_game_focus",
+                            hwnd=hwnd,
+                            elapsed="{:.3f}".format(now - self._foreground_changed_at),
+                            delay=delay,
+                        )
+                    return
+                is_top = self.istopmost()
+                refresh = globalconfig.get("topmost_refresh_ms", 5000) / 1000
+                should_refresh = now - self._last_settop_time >= refresh
+                if hanglog.enabled():
+                    hanglog.log(
+                        "ui.top.check.state",
+                        hwnd=hwnd,
+                        focus_pid=_focusp,
+                        is_top=is_top,
+                        should_refresh=should_refresh,
+                    )
+                if (not is_top) or should_refresh:
+                    self.settop()
+            except Exception as e:
+                if hanglog.enabled():
+                    hanglog.log("ui.top.check.exception", error=stringfyerror(e))
+                print_exc()
 
     def seteffect(self):
         if ui_settings.get("WindowEffect", 0) == 0:
@@ -776,6 +846,10 @@ class TranslatorWindow(resizableframeless):
         self.isbindedwindow = False
         self.setontopthread_lock = threading.Lock()
         self.ocr_once_follow_rect = None
+        self._last_settop_time = 0
+        self._last_foreground_hwnd = 0
+        self._foreground_changed_at = 0
+        self._last_trace_log = 0
 
     def displayglobaltooltip_f(self, string):
         QToolTip.showText(QCursor.pos(), string, self)

@@ -4,6 +4,8 @@
     "hook_async_dispatch": true,
     "hook_output_queue_size": 2000,
     "hook_unselected_ui_throttle_ms": 200,
+    "topmost_foreground_delay_ms": 500,
+    "topmost_refresh_ms": 5000,
     "llama.cpp": {},
     "screenshot_savepath": "",
     "history": {
