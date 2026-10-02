@@ -166,6 +166,14 @@ def gethookgrid(dic=None):
                 "HOOK自动恢复",
                 D_getsimpleswitch(globalconfig, "hook_auto_recover"),
                 "",
+                "自动重插HOOK",
+                D_getsimpleswitch(globalconfig, "hook_auto_recover_reinsert"),
+            ]
+            if isglobal
+            else None
+        ),
+        (
+            [
                 "无输出恢复阈值_(s)",
                 (
                     D_getspinbox(

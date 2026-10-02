@@ -435,7 +435,56 @@ class texthook(basetext):
                         error=stringfyerror(e),
                     )
         if hanglog.enabled():
+            hanglog.log("texthook.recover.resync_done_all")
+        self.reinsert_stale_hook_codes(alive_pids, selectedhooks, age)
+        if hanglog.enabled():
             hanglog.log("texthook.recover.done")
+
+    def reinsert_stale_hook_codes(self, alive_pids, selectedhooks, age):
+        if not globalconfig.get("hook_auto_recover_reinsert", True):
+            return
+        hookcodes = []
+        seen = set()
+        for key in selectedhooks:
+            hc, _, tp = key
+            if tp.processId not in alive_pids:
+                continue
+            if hc in seen:
+                continue
+            seen.add(hc)
+            hookcodes.append((tp.processId, hc))
+        for hookcode in self.hconfig.get("needinserthookcode", []):
+            if hookcode in seen:
+                continue
+            seen.add(hookcode)
+            for pid in alive_pids:
+                hookcodes.append((pid, hookcode))
+        if not hookcodes:
+            return
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.recover.reinsert_start",
+                count=len(hookcodes),
+                age="{:.3f}".format(age),
+                hookcodes=hookcodes,
+            )
+        for pid, hookcode in hookcodes:
+            try:
+                self.Luna_InsertHookCode(pid, hookcode)
+                if hanglog.enabled():
+                    hanglog.log(
+                        "texthook.recover.reinsert_done",
+                        pid=pid,
+                        hookcode=hookcode,
+                    )
+            except Exception as e:
+                if hanglog.enabled():
+                    hanglog.log(
+                        "texthook.recover.reinsert_error",
+                        pid=pid,
+                        hookcode=hookcode,
+                        error=stringfyerror(e),
+                    )
 
     @tryprint
     def sysmessage(self, info, sentence):
