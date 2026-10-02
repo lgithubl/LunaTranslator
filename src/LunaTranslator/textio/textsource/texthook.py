@@ -157,6 +157,7 @@ class texthook(basetext):
         self.runonce_line = ""
         self._last_output_time = 0
         self._last_output_text = ""
+        self._last_hook_recover_time = 0
         self.emugameid = None
         self.engine = ""
         self._unityfont_autoemitted = False
@@ -307,6 +308,7 @@ class texthook(basetext):
     def diagnosticheartbeat(self):
         while not self.ending:
             time.sleep(5)
+            self.recover_stale_hook()
             if not hanglog.enabled():
                 continue
             try:
@@ -361,12 +363,128 @@ class texthook(basetext):
                     else "never"
                 ),
                 last_output=self._last_output_text,
-                ui_tick_age=hanglog.ui_tick_age_text(),
                 foreground=foreground,
                 foreground_pid=foreground_pid,
                 foreground_process=foreground_process,
                 foreground_title=foreground_title,
             )
+
+    def recover_stale_hook(self):
+        if not globalconfig.get("hook_auto_recover", True):
+            return
+        if not self._last_output_time:
+            return
+        try:
+            stale_after = max(30, int(globalconfig.get("hook_auto_recover_after", 300)))
+            recover_interval = max(
+                30, int(globalconfig.get("hook_auto_recover_interval", 120))
+            )
+        except:
+            stale_after = 300
+            recover_interval = 120
+        now = time.time()
+        age = now - self._last_output_time
+        if age < stale_after:
+            return
+        if now - self._last_hook_recover_time < recover_interval:
+            return
+        selectedhooks = list(self.selectedhook)
+        if not selectedhooks:
+            return
+        try:
+            alive_pids = set(
+                NativeUtils.collect_running_pids(list(self.pids.get(self.gameuid, [])))
+            )
+        except:
+            alive_pids = set()
+        if not alive_pids:
+            if hanglog.enabled():
+                hanglog.log(
+                    "texthook.recover.skip_no_alive_pid",
+                    selected=len(selectedhooks),
+                    age="{:.3f}".format(age),
+                )
+            return
+        self._last_hook_recover_time = now
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.recover.start",
+                selected=len(selectedhooks),
+                alive_pids=list(alive_pids),
+                age="{:.3f}".format(age),
+                hooks=[self.serialkey(key) for key in selectedhooks],
+            )
+        for key in selectedhooks:
+            _, _, tp = key
+            if tp.processId not in alive_pids:
+                continue
+            try:
+                self.Luna_SyncThread(tp, False)
+                time.sleep(0.02)
+                self.Luna_SyncThread(tp, True)
+                if hanglog.enabled():
+                    hanglog.log(
+                        "texthook.recover.resync_done",
+                        key=self.serialkey(key),
+                    )
+            except Exception as e:
+                if hanglog.enabled():
+                    hanglog.log(
+                        "texthook.recover.resync_error",
+                        key=self.serialkey(key),
+                        error=stringfyerror(e),
+                    )
+        if hanglog.enabled():
+            hanglog.log("texthook.recover.resync_done_all")
+        self.reinsert_stale_hook_codes(alive_pids, selectedhooks, age)
+        if hanglog.enabled():
+            hanglog.log("texthook.recover.done")
+
+    def reinsert_stale_hook_codes(self, alive_pids, selectedhooks, age):
+        if not globalconfig.get("hook_auto_recover_reinsert", True):
+            return
+        hookcodes = []
+        seen = set()
+        for key in selectedhooks:
+            hc, _, tp = key
+            if tp.processId not in alive_pids:
+                continue
+            if hc in seen:
+                continue
+            seen.add(hc)
+            hookcodes.append((tp.processId, hc))
+        for hookcode in self.hconfig.get("needinserthookcode", []):
+            if hookcode in seen:
+                continue
+            seen.add(hookcode)
+            for pid in alive_pids:
+                hookcodes.append((pid, hookcode))
+        if not hookcodes:
+            return
+        if hanglog.enabled():
+            hanglog.log(
+                "texthook.recover.reinsert_start",
+                count=len(hookcodes),
+                age="{:.3f}".format(age),
+                hookcodes=hookcodes,
+            )
+        for pid, hookcode in hookcodes:
+            try:
+                self.Luna_InsertHookCode(pid, hookcode)
+                if hanglog.enabled():
+                    hanglog.log(
+                        "texthook.recover.reinsert_done",
+                        pid=pid,
+                        hookcode=hookcode,
+                    )
+            except Exception as e:
+                if hanglog.enabled():
+                    hanglog.log(
+                        "texthook.recover.reinsert_error",
+                        pid=pid,
+                        hookcode=hookcode,
+                        error=stringfyerror(e),
+                    )
 
     @tryprint
     def sysmessage(self, info, sentence):
@@ -599,22 +717,7 @@ class texthook(basetext):
 
     def QueryThreadHistory(self, tp, _latest=False):
         ret = []
-        if hanglog.enabled():
-            hanglog.log(
-                "texthook.query_history.before",
-                processId=tp.processId,
-                addr=tp.addr,
-                latest=_latest,
-            )
         self.Luna_QueryThreadHistory(tp, _latest, QueryHistoryCallback(ret.append))
-        if hanglog.enabled():
-            hanglog.log(
-                "texthook.query_history.after",
-                processId=tp.processId,
-                addr=tp.addr,
-                latest=_latest,
-                count=len(ret),
-            )
         return ret[0]
 
     def removeproc(self, pid):
@@ -632,11 +735,7 @@ class texthook(basetext):
             raise Exception(_[1])
         injectpids = []
         for pid in pids:
-            if hanglog.enabled():
-                hanglog.log("texthook.connect_process.before", pid=pid)
             self.Luna_ConnectProcess(pid)
-            if hanglog.enabled():
-                hanglog.log("texthook.connect_process.after", pid=pid)
             if self.Luna_CheckIfNeedInject(pid):
                 injectpids.append(pid)
         if not injectpids:
@@ -707,19 +806,7 @@ class texthook(basetext):
         self.pids[self.gameuid].add(pid)
         self.maybepids.discard(pid)
         for hookcode in self.needinserthookcode:
-            if hanglog.enabled():
-                hanglog.log(
-                    "texthook.auto_insert_hook.before",
-                    pid=pid,
-                    hookcode=hookcode,
-                )
             self.Luna_InsertHookCode(pid, hookcode)
-            if hanglog.enabled():
-                hanglog.log(
-                    "texthook.auto_insert_hook.after",
-                    pid=pid,
-                    hookcode=hookcode,
-                )
         if self.hconfig.get("insertpchooks_string", False):
             self.InsertPCHooks(pid)
         gobject.base.displayinfomessage(self.hconfig["title"], "<msg_info_refresh>")
@@ -1006,19 +1093,7 @@ class texthook(basetext):
 
     def inserthook(self, hookcode):
         for pid in self.pids[self.gameuid].copy():
-            if hanglog.enabled():
-                hanglog.log(
-                    "texthook.insert_hook.before",
-                    pid=pid,
-                    hookcode=hookcode,
-                )
             self.Luna_InsertHookCode(pid, hookcode)
-            if hanglog.enabled():
-                hanglog.log(
-                    "texthook.insert_hook.after",
-                    pid=pid,
-                    hookcode=hookcode,
-                )
 
     @threader
     def delaycollectallselectedoutput(self):
@@ -1090,21 +1165,7 @@ class texthook(basetext):
                 addr=tp.addr,
                 output=output,
             )
-        if hanglog.enabled():
-            hanglog.log(
-                "texthook.update_item_new_line.before",
-                hook=hc,
-                processId=tp.processId,
-                addr=tp.addr,
-            )
         gobject.base.hookselectdialog.update_item_new_line.emit(key, output)
-        if hanglog.enabled():
-            hanglog.log(
-                "texthook.update_item_new_line.after",
-                hook=hc,
-                processId=tp.processId,
-                addr=tp.addr,
-            )
         if hanglog.enabled():
             hanglog.log(
                 "texthook.handle_output.exit",

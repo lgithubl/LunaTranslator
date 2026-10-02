@@ -1,6 +1,10 @@
 {
     "showna": true,
     "diagnostic_log": false,
+    "hook_auto_recover": true,
+    "hook_auto_recover_reinsert": true,
+    "hook_auto_recover_after": 300,
+    "hook_auto_recover_interval": 120,
     "llama.cpp": {},
     "screenshot_savepath": "",
     "history": {
