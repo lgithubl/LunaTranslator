@@ -161,54 +161,6 @@ def gethookgrid(dic=None):
             if isglobal
             else None
         ),
-        (
-            [
-                "HOOK自动恢复",
-                D_getsimpleswitch(globalconfig, "hook_auto_recover"),
-                "",
-                "自动重插HOOK",
-                D_getsimpleswitch(globalconfig, "hook_auto_recover_reinsert"),
-            ]
-            if isglobal
-            else None
-        ),
-        (
-            [
-                "无输出恢复阈值_(s)",
-                (
-                    D_getspinbox(
-                        30,
-                        3600,
-                        globalconfig,
-                        "hook_auto_recover_after",
-                        default=300,
-                    ),
-                    2,
-                ),
-            ]
-            if isglobal
-            else None
-        ),
-        (
-            [
-                "恢复间隔_(s)",
-                (
-                    D_getspinbox(
-                        30,
-                        3600,
-                        globalconfig,
-                        "hook_auto_recover_interval",
-                        default=120,
-                    ),
-                    2,
-                ),
-                "",
-                "",
-                "",
-            ]
-            if isglobal
-            else None
-        ),
         [
             "代码页",
             (

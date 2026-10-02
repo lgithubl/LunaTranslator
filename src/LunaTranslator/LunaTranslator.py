@@ -309,6 +309,55 @@ class BASEOBJECT(QObject):
         self.istriggertoupdate = False
         self.service = TCPService()
         registerall(self.service)
+        self._diagnostic_ui_timer = QTimer(self)
+        self._diagnostic_ui_timer.setInterval(1000)
+        self._diagnostic_ui_timer.timeout.connect(self._diagnostic_ui_tick)
+        self._diagnostic_ui_timer.start()
+        hanglog.mark_ui_tick()
+        self.diagnosticheartbeat()
+
+    def _diagnostic_ui_tick(self):
+        hanglog.mark_ui_tick()
+
+    @threader
+    def diagnosticheartbeat(self):
+        while not self.willshutdown:
+            time.sleep(5)
+            if not hanglog.enabled():
+                continue
+            try:
+                foreground = windows.GetForegroundWindow()
+                foreground_pid = windows.GetWindowThreadProcessId(foreground)
+                foreground_process = (
+                    windows.GetProcessFileName(foreground_pid) if foreground_pid else ""
+                )
+                foreground_title = windows.GetWindowText(foreground) if foreground else ""
+            except:
+                foreground = 0
+                foreground_pid = 0
+                foreground_process = ""
+                foreground_title = ""
+            hanglog.log(
+                "app.heartbeat",
+                ui_tick_age=hanglog.ui_tick_age_text(),
+                hwnd=self.hwnd,
+                gameuid=self.gameuid,
+                currenttext=self.currenttext,
+                currenttranslate=self.currenttranslate_1,
+                foreground=foreground,
+                foreground_pid=foreground_pid,
+                foreground_process=foreground_process,
+                foreground_title=foreground_title,
+            )
+            hanglog.dump_if_ui_stale(
+                "app.ui_stale",
+                hwnd=self.hwnd,
+                gameuid=self.gameuid,
+                foreground=foreground,
+                foreground_pid=foreground_pid,
+                foreground_process=foreground_process,
+                foreground_title=foreground_title,
+            )
 
     def createimageview(self, parent):
         m = LDialog(parent, Qt.WindowType.WindowCloseButtonHint)
