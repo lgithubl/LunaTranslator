@@ -161,6 +161,50 @@ def gethookgrid(dic=None):
             if isglobal
             else None
         ),
+        (
+            [
+                "HOOK异步派发",
+                D_getsimpleswitch(globalconfig, "hook_async_dispatch"),
+                "",
+                "",
+            ]
+            if isglobal
+            else None
+        ),
+        (
+            [
+                "HOOK队列上限",
+                (
+                    D_getspinbox(
+                        100,
+                        100000,
+                        globalconfig,
+                        "hook_output_queue_size",
+                        default=2000,
+                    ),
+                    2,
+                ),
+            ]
+            if isglobal
+            else None
+        ),
+        (
+            [
+                "未选HOOK刷新节流(ms)",
+                (
+                    D_getspinbox(
+                        0,
+                        5000,
+                        globalconfig,
+                        "hook_unselected_ui_throttle_ms",
+                        default=200,
+                    ),
+                    2,
+                ),
+            ]
+            if isglobal
+            else None
+        ),
         [
             "代码页",
             (

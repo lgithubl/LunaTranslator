@@ -1,4 +1,5 @@
 import os
+import queue
 import threading
 import time
 
@@ -6,6 +7,9 @@ import gobject
 
 
 _lock = threading.Lock()
+_writer_lock = threading.Lock()
+_queue = queue.Queue(maxsize=10000)
+_writer_started = False
 _max_bytes = 2 * 1024 * 1024
 
 
@@ -60,10 +64,39 @@ def _rotate_if_needed(path):
         pass
 
 
+def _write_line(path, line):
+    with _lock:
+        _rotate_if_needed(path)
+        with open(path, "a", encoding="utf-8", errors="replace") as ff:
+            ff.write(line)
+
+
+def _writer():
+    while True:
+        path, line = _queue.get()
+        try:
+            _write_line(path, line)
+        except:
+            pass
+
+
+def _ensure_writer():
+    global _writer_started
+    if _writer_started:
+        return
+    with _writer_lock:
+        if _writer_started:
+            return
+        t = threading.Thread(target=_writer, daemon=True)
+        t.start()
+        _writer_started = True
+
+
 def log(tag, **fields):
     try:
         if not enabled():
             return
+        _ensure_writer()
         path = _path()
         now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         millis = int((time.time() % 1) * 1000)
@@ -72,9 +105,9 @@ def log(tag, **fields):
         for key, value in fields.items():
             parts.append("{}={}".format(key, _short(value)))
         line = " | ".join(parts) + "\n"
-        with _lock:
-            _rotate_if_needed(path)
-            with open(path, "a", encoding="utf-8", errors="replace") as ff:
-                ff.write(line)
+        try:
+            _queue.put_nowait((path, line))
+        except queue.Full:
+            pass
     except:
         pass

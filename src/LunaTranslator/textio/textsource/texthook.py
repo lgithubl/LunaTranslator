@@ -1,4 +1,5 @@
 import threading
+import queue
 import re, os
 import time, gobject, windows
 from qtsymbols import *
@@ -153,6 +154,9 @@ class texthook(basetext):
         self.usermanualaccepthooks = []
         self.multiselectedcollector = []
         self.multiselectedcollectorlock = threading.Lock()
+        self._output_queue = queue.Queue(maxsize=globalconfig.get("hook_output_queue_size", 2000))
+        self._last_hook_ui_enqueue = {}
+        self._last_hook_ui_update = {}
         self.lastflushtime = 0
         self.runonce_line = ""
         self._last_output_time = 0
@@ -162,6 +166,7 @@ class texthook(basetext):
         self._unityfont_autoemitted = False
         gobject.base.autoswitchgameuid = False
         self.initdll()
+        self.hookoutputworker()
         self.delaycollectallselectedoutput()
         self.diagnosticheartbeat()
         self.autohookmonitorthread()
@@ -361,6 +366,7 @@ class texthook(basetext):
                     else "never"
                 ),
                 last_output=self._last_output_text,
+                output_qsize=self._output_queue.qsize(),
                 foreground=foreground,
                 foreground_pid=foreground_pid,
                 foreground_process=foreground_process,
@@ -1018,21 +1024,101 @@ class texthook(basetext):
             self.lastflushtime = time.time()
             self.multiselectedcollector.append((key, text))
 
+    @threader
+    def hookoutputworker(self):
+        while not self.ending:
+            try:
+                item = self._output_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self._handle_output_queued(*item)
+            except:
+                print_exc()
+
+    def _copy_thread_param(self, tp):
+        copied = ThreadParam()
+        copied.processId = tp.processId
+        copied.addr = tp.addr
+        copied.ctx = tp.ctx
+        copied.ctx2 = tp.ctx2
+        return copied
+
     def handle_output(self, hc, hn: bytes, tp, output):
+        hookname = hn.decode("utf8", errors="replace")
+        copied = self._copy_thread_param(tp)
+        key = (hc, hookname, copied)
         self._last_output_time = time.time()
         self._last_output_text = output
+        selected = key in self.selectedhook
+        if not globalconfig.get("hook_async_dispatch", True):
+            return self._handle_output_queued(hc, hookname, copied, output, selected)
+        if not selected and not self._should_enqueue_unselected_hook(key):
+            return
+        try:
+            self._output_queue.put_nowait((hc, hookname, copied, output, selected))
+            if hanglog.enabled():
+                hanglog.log(
+                    "texthook.handle_output.queued",
+                    hook=hc,
+                    hookname=hookname,
+                    processId=copied.processId,
+                    addr=copied.addr,
+                    selected=selected,
+                    qsize=self._output_queue.qsize(),
+                    output=output,
+                )
+        except queue.Full:
+            if hanglog.enabled():
+                hanglog.log(
+                    "texthook.handle_output.drop_queue_full",
+                    hook=hc,
+                    hookname=hookname,
+                    processId=copied.processId,
+                    addr=copied.addr,
+                    selected=selected,
+                    qsize=self._output_queue.qsize(),
+                    output=output,
+                )
+
+    def _should_enqueue_unselected_hook(self, key):
+        interval = globalconfig.get("hook_unselected_ui_throttle_ms", 200) / 1000
+        if interval <= 0:
+            return True
+        now = time.time()
+        last = self._last_hook_ui_enqueue.get(key, 0)
+        if now - last < interval:
+            return False
+        self._last_hook_ui_enqueue[key] = now
+        return True
+
+    def _should_update_hook_ui(self, key, selected):
+        if selected:
+            return True
+        interval = globalconfig.get("hook_unselected_ui_throttle_ms", 200) / 1000
+        now = time.time()
+        last = self._last_hook_ui_update.get(key, 0)
+        if now - last < interval:
+            return False
+        self._last_hook_ui_update[key] = now
+        return True
+
+    def _handle_output_queued(self, hc, hookname, tp, output, selected_at_enqueue):
         if hanglog.enabled():
             hanglog.log(
                 "texthook.handle_output.enter",
                 hook=hc,
-                hookname=hn.decode("utf8", errors="replace"),
+                hookname=hookname,
                 processId=tp.processId,
                 addr=tp.addr,
                 selected=len(self.selectedhook),
+                selected_at_enqueue=selected_at_enqueue,
+                qsize=self._output_queue.qsize(),
                 output=output,
             )
-        key = (hc, hn.decode("utf8"), tp)
-        if key in self.selectedhook:
+        key = (hc, hookname, tp)
+        selected = key in self.selectedhook
+        if selected:
             if len(self.selectedhook) == 1:
                 self.dispatchtext(output)
             else:
@@ -1041,12 +1127,30 @@ class texthook(basetext):
             hanglog.log(
                 "texthook.handle_output.not_selected",
                 hook=hc,
-                hookname=hn.decode("utf8", errors="replace"),
+                hookname=hookname,
                 processId=tp.processId,
                 addr=tp.addr,
                 output=output,
             )
-        gobject.base.hookselectdialog.update_item_new_line.emit(key, output)
+        if self._should_update_hook_ui(key, selected):
+            gobject.base.hookselectdialog.update_item_new_line.emit(key, output)
+            if hanglog.enabled():
+                hanglog.log(
+                    "texthook.handle_output.ui_update",
+                    hook=hc,
+                    hookname=hookname,
+                    processId=tp.processId,
+                    addr=tp.addr,
+                    selected=selected,
+                )
+        elif hanglog.enabled():
+            hanglog.log(
+                "texthook.handle_output.ui_skip_throttle",
+                hook=hc,
+                hookname=hookname,
+                processId=tp.processId,
+                addr=tp.addr,
+            )
         if hanglog.enabled():
             hanglog.log(
                 "texthook.handle_output.exit",

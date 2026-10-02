@@ -1,6 +1,9 @@
 {
     "showna": true,
     "diagnostic_log": false,
+    "hook_async_dispatch": true,
+    "hook_output_queue_size": 2000,
+    "hook_unselected_ui_throttle_ms": 200,
     "llama.cpp": {},
     "screenshot_savepath": "",
     "history": {
