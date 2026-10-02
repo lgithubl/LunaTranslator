@@ -157,7 +157,6 @@ class texthook(basetext):
         self.runonce_line = ""
         self._last_output_time = 0
         self._last_output_text = ""
-        self._last_hook_recover_time = 0
         self.emugameid = None
         self.engine = ""
         self._unityfont_autoemitted = False
@@ -308,7 +307,6 @@ class texthook(basetext):
     def diagnosticheartbeat(self):
         while not self.ending:
             time.sleep(5)
-            self.recover_stale_hook()
             if not hanglog.enabled():
                 continue
             try:
@@ -327,35 +325,13 @@ class texthook(basetext):
                 pids = {key: list(value) for key, value in self.pids.items()}
             except:
                 pids = {}
-            try:
-                target_pid = windows.GetWindowThreadProcessId(gobject.base.hwnd)
-                target_process = (
-                    windows.GetProcessFileName(target_pid) if target_pid else ""
-                )
-                target_title = (
-                    windows.GetWindowText(gobject.base.hwnd) if gobject.base.hwnd else ""
-                )
-            except:
-                target_pid = 0
-                target_process = ""
-                target_title = ""
-            try:
-                bound_pids = list(self.pids.get(self.gameuid, []))
-                alive_pids = NativeUtils.collect_running_pids(bound_pids)
-            except:
-                bound_pids = []
-                alive_pids = []
             hanglog.log(
                 "texthook.heartbeat",
                 selected=len(self.selectedhook),
                 selectedhooks=[self.serialkey(key) for key in self.selectedhook],
                 pids=pids,
-                alive_pids=alive_pids,
                 maybe_pids=list(self.maybepids),
                 hwnd=gobject.base.hwnd,
-                hwnd_pid=target_pid,
-                hwnd_process=target_process,
-                hwnd_title=target_title,
                 gameuid=gobject.base.gameuid,
                 last_output_age=(
                     "{:.3f}".format(time.time() - self._last_output_time)
@@ -368,74 +344,6 @@ class texthook(basetext):
                 foreground_process=foreground_process,
                 foreground_title=foreground_title,
             )
-
-    def recover_stale_hook(self):
-        if not globalconfig.get("hook_auto_recover", True):
-            return
-        if not self._last_output_time:
-            return
-        try:
-            stale_after = max(30, int(globalconfig.get("hook_auto_recover_after", 300)))
-            recover_interval = max(
-                30, int(globalconfig.get("hook_auto_recover_interval", 120))
-            )
-        except:
-            stale_after = 300
-            recover_interval = 120
-        now = time.time()
-        age = now - self._last_output_time
-        if age < stale_after:
-            return
-        if now - self._last_hook_recover_time < recover_interval:
-            return
-        selectedhooks = list(self.selectedhook)
-        if not selectedhooks:
-            return
-        try:
-            alive_pids = set(
-                NativeUtils.collect_running_pids(list(self.pids.get(self.gameuid, [])))
-            )
-        except:
-            alive_pids = set()
-        if not alive_pids:
-            if hanglog.enabled():
-                hanglog.log(
-                    "texthook.recover.skip_no_alive_pid",
-                    selected=len(selectedhooks),
-                    age="{:.3f}".format(age),
-                )
-            return
-        self._last_hook_recover_time = now
-        if hanglog.enabled():
-            hanglog.log(
-                "texthook.recover.start",
-                selected=len(selectedhooks),
-                alive_pids=list(alive_pids),
-                age="{:.3f}".format(age),
-                hooks=[self.serialkey(key) for key in selectedhooks],
-            )
-        for key in selectedhooks:
-            _, _, tp = key
-            if tp.processId not in alive_pids:
-                continue
-            try:
-                self.Luna_SyncThread(tp, False)
-                time.sleep(0.02)
-                self.Luna_SyncThread(tp, True)
-                if hanglog.enabled():
-                    hanglog.log(
-                        "texthook.recover.resync_done",
-                        key=self.serialkey(key),
-                    )
-            except Exception as e:
-                if hanglog.enabled():
-                    hanglog.log(
-                        "texthook.recover.resync_error",
-                        key=self.serialkey(key),
-                        error=stringfyerror(e),
-                    )
-        if hanglog.enabled():
-            hanglog.log("texthook.recover.done")
 
     @tryprint
     def sysmessage(self, info, sentence):
